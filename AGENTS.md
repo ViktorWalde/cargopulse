@@ -5,29 +5,32 @@ Telemetria e integração logística em C#/.NET. A especificação descreve o al
 ## Entrada e leitura sob demanda
 
 1. Leia este arquivo e, se existir, `.agents/progress.md`. Esse registro é local e não versionado; quando ausente, consulte o histórico Git e os arquivos reais. A solicitação atual define a tarefa; o próximo passo registrado serve para continuidade.
-2. Consulte apenas as seções abaixo relacionadas à tarefa, incluindo regras e testes associados. Não carregue toda a documentação por padrão.
+2. Consulte apenas as seções abaixo relacionadas à tarefa, incluindo os IDs RF/RNF, regras e testes associados. Os requisitos e seus limites ficam em `docs/requisitos.md`; as demais seções da tabela referem-se a `docs/especificacao.md`. Não carregue toda a documentação por padrão.
 3. Inspecione os arquivos envolvidos e o estado do Git, se houver. Amplie a leitura quando aparecer uma dependência ou divergência.
 
-| Tarefa | Seções de [docs/especificacao.md](docs/especificacao.md) |
+| Tarefa | Referências |
 |---|---|
 | Entender produto, prioridade e limites | 1–3 |
-| Definir requisitos funcionais/não funcionais | 2, 7.3, 12, 13 e 23.1; validar com 17 |
+| Definir requisitos funcionais/não funcionais | [docs/requisitos.md](docs/requisitos.md); regras 7.3, testes 17, etapas 20 e decisões 23 |
 | Alterar arquitetura ou dependências | 5–6, 18 e 23 |
 | Domínio, cadastro, persistência | 7, 10; testes 17 |
 | API, contratos, autenticação | 8–9, 12; regras aplicáveis em 7.3; testes 17 |
 | Worker, idempotência, falhas | 6.4, 7.3, 10–11; testes 17 |
 | Dashboard ou simulador | 13 ou 14, 12 e contratos utilizados em 8–9; testes 17 |
 | ERP ou webhook, quando P1 estiver liberado | 15 ou 16, 7.3, 12; testes 17 |
-| Ambiente, M0 ou outro marco | 5, 18–20; ler somente o marco envolvido |
+| Ambiente, M0 ou outro marco | 5, 18–20; ler o marco e os IDs de requisitos associados |
 | Testar ou concluir funcionalidade | 17 e 19.1, além da regra/contrato alterado |
 | Publicar ou demonstrar | 21–22 |
 
 Localize títulos com `rg -n '^#{2,3} ' docs/especificacao.md`. Leia o intervalo necessário com `sed`; por exemplo, `sed -n '/^## 7\. /,/^## 8\. /p' docs/especificacao.md`. Não registre números de linha como referência permanente.
 
+Localize requisitos por ID, por exemplo `rg -n 'RF-04|RNF-03' docs/requisitos.md`, incluindo limites referenciados na seção 4 do catálogo. IDs RF/RNF identificam o aceite; regras RB e cenários T detalham comportamento e verificação.
+
 ## Fontes e manutenção
 
 - **Este arquivo:** navegação e regras de trabalho.
 - **`docs/especificacao.md`:** documentação técnica pública: escopo, regras, contratos, arquitetura proposta, testes e critérios dos marcos. Atualize a seção responsável; referencie em vez de copiar.
+- **`docs/requisitos.md`:** fonte dos RF/RNF, critérios de aceite e valores do perfil local. A especificação referencia esse catálogo sem duplicar seus limites.
 - **`.agents/progress.md`:** estado verificado, pendências e próximo incremento. Substitua o resumo ao encerrar a tarefa; evite diário de sessões ou saídas extensas.
 - **`.agents/handoff.md`:** apenas encaminha para esta entrada; não mantém instruções próprias.
 

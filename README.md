@@ -4,6 +4,6 @@ Plataforma de telemetria e integração logística para cargas sensíveis à tem
 
 O fluxo previsto conecta simulador de sensores, API, fila, Worker, persistência e dashboard operacional.
 
-O projeto está na etapa de especificação. A implementação da aplicação ainda não foi iniciada. A próxima etapa é consolidar os requisitos funcionais e não funcionais e seus critérios de aceite.
+Os requisitos funcionais e não funcionais do MVP, os critérios de aceite e os cortes de escopo estão definidos. A implementação ainda não foi iniciada; a revisão da arquitetura básica antecede a fundação da aplicação.
 
-A [especificação funcional e técnica](docs/especificacao.md) apresenta escopo, arquitetura proposta, contratos, regras de negócio, estratégia de testes e marcos de implementação.
+O [catálogo de requisitos](docs/requisitos.md) apresenta comportamentos, qualidades e limites do MVP. A [especificação funcional e técnica](docs/especificacao.md) detalha regras de negócio, contratos, cenários de teste e etapas de implementação.

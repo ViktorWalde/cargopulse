@@ -1,11 +1,11 @@
 # CargoPulse — Especificação funcional e técnica
 
-- **Versão:** 1.2
+- **Versão:** 1.3
 - **Data de referência:** 05/11/2026
 - **Estado:** especificação em planejamento; implementação não iniciada.
 - **Domínio:** telemetria de cargas sensíveis à temperatura e integração logística.
 
-Este documento descreve o escopo, os contratos e os critérios técnicos previstos para o CargoPulse. As seções 20 e 21 estabelecem critérios de entrega e validação; as definições pendentes estão na seção 23.
+Este documento descreve regras de negócio, contratos e decisões técnicas do CargoPulse. O [catálogo de requisitos](requisitos.md) identifica RF/RNF, critérios de aceite e limites do MVP. A seção 20 organiza as entregas; a seção 23 delimita as decisões de engenharia pendentes. A implementação ainda não foi iniciada.
 
 ---
 
@@ -59,11 +59,19 @@ O sistema reúne ingestão HTTP, persistência relacional, mensageria, processam
 
 A entrega inicial percorre o fluxo completo com uma medição e um teste automatizado. Lotes, cenários adicionais de falha e interface são incorporados em incrementos posteriores. P1/P2 dependem de P0 funcional e reproduzível.
 
+### 2.4 Cortes de escopo
+
+P0 inclui cadastro, associação temporal, ingestão, histórico, alertas, diagnóstico e interface local. O reconhecimento de alerta é permitido; correção de leituras persistidas, alteração retroativa de vínculos e reprocessamento operacional de telemetria ficam fora do MVP. Cadastro e histórico não possuem exclusão física.
+
+ERP, webhooks e reprocessamento de integrações pertencem a P1. Autenticação de produção, implantação em nuvem, cache, SOAP, Functions, outbox e metas de capacidade permanecem fora de P0. P2 depende de problema medido ou necessidade funcional identificada.
+
+Cada incremento corresponde a requisitos identificados, testes aplicáveis e um marco da seção 20. Alterações no escopo ou nos limites do perfil local atualizam o catálogo e os critérios afetados antes da implementação.
+
 ---
 
 ## 3. Cenário de negócio
 
-Uma transportadora fictícia transporta medicamentos refrigerados. Cada **Entrega** possui uma janela de operação, uma faixa permitida de temperatura, um veículo e um dispositivo sensor associado. O dispositivo emite leituras de temperatura, umidade e localização com um identificador próprio de evento.
+Uma transportadora fictícia transporta medicamentos refrigerados. Cada **Entrega** possui um estado operacional, uma faixa permitida de temperatura e um veículo. A associação entre entrega e dispositivo possui um intervalo de validade próprio. O dispositivo emite leituras de temperatura, umidade e localização com um identificador próprio de evento.
 
 **Fluxo principal:**
 
@@ -123,6 +131,8 @@ Documentação oficial de referência:
 - [Azure Service Bus Emulator — visão geral](https://learn.microsoft.com/en-us/azure/service-bus-messaging/overview-emulator)
 - [Azure Service Bus Emulator — execução local](https://learn.microsoft.com/en-us/azure/service-bus-messaging/test-locally-with-service-bus-emulator)
 - [SQL Server no Docker](https://learn.microsoft.com/en-us/sql/linux/quickstart-install-connect-docker?view=sql-server-ver17)
+- [Comparação de GUIDs e `uniqueidentifier`](https://learn.microsoft.com/en-us/sql/connect/ado-net/sql/compare-guid-uniqueidentifier-values?view=sql-server-ver17)
+- [Service Bus — contagem de entregas e DLQ](https://learn.microsoft.com/en-us/azure/service-bus-messaging/service-bus-dead-letter-queues)
 - [Testes de integração ASP.NET Core](https://learn.microsoft.com/en-us/aspnet/core/test/integration-tests?view=aspnetcore-10.0)
 
 ---
@@ -167,7 +177,7 @@ No MVP, o dashboard compartilha o host ASP.NET Core com a API. Regras de negóci
 7. Mensagens e endpoints são contratos versionados.
 8. Padrões e abstrações atendem a problemas identificados e verificáveis.
 
-O detalhamento de modularidade, SOLID (incluindo open/closed), reutilização de regras e resiliência depende da consolidação de requisitos da seção 23.1. Circuit breaker permanece sujeito à identificação da dependência afetada, dos critérios de abertura e da condição de recuperação.
+O detalhamento de modularidade, SOLID (incluindo open/closed), reutilização e resiliência atende a RNF-02 e RNF-06. A revisão de engenharia da seção 23 define as fronteiras e políticas concretas; circuit breaker depende da identificação da dependência afetada e dos critérios de abertura/recuperação.
 
 ### 6.4 Entrega sem perda silenciosa
 
@@ -187,8 +197,8 @@ Um *transactional outbox* para sincronização de mutação SQL e publicação d
 |---|---|---|
 | `Device` | `Id`, `ExternalCode`, `Name`, `IsActive`, `CreatedAtUtc` | Código externo único; inativo não aceita novas leituras |
 | `Vehicle` | `Id`, `FleetCode`, `Description` | Código de frota único (fictício) |
-| `Shipment` | `Id`, `ExternalReference`, `VehicleId`, `Status`, `MinTempC`, `MaxTempC`, `StartedAtUtc`, `FinishedAtUtc?` | `MinTempC < MaxTempC`; status tem transições válidas |
-| `DeviceAssignment` | `Id`, `DeviceId`, `ShipmentId`, `ValidFromUtc`, `ValidToUtc?` | Um dispositivo tem no máximo uma associação ativa em um instante |
+| `Shipment` | `Id`, `ExternalReference`, `VehicleId`, `Status`, `MinTempC`, `MaxTempC`, `CreatedAtUtc`, `StartedAtUtc?`, `FinishedAtUtc?` | `MinTempC < MaxTempC`; status tem transições válidas |
+| `DeviceAssignment` | `Id`, `DeviceId`, `ShipmentId`, `ValidFromUtc`, `ValidToUtc?` | Dispositivo e entrega possuem no máximo uma associação em cada instante; intervalos semiabertos |
 | `TelemetryReading` | `Id`, `DeviceId`, `EventId`, `OccurredAtUtc`, `ReceivedAtUtc`, `TemperatureC`, `HumidityPercent?`, `Latitude?`, `Longitude?`, `ShipmentId?`, `PayloadHash` | Chave única `(DeviceId, EventId)` |
 | `TemperatureAlert` | `Id`, `ReadingId`, `ShipmentId`, `Type`, `ObservedTempC`, `CreatedAtUtc`, `AcknowledgedAtUtc?` | No máximo um alerta do mesmo tipo por leitura |
 | `ProcessingFailure` | `Id`, `CorrelationId`, `DeviceId?`, `EventId?`, `Category`, `Reason`, `DetectedAtUtc`, `ResolutionStatus` | Rastrear falhas definitivas sem dados sensíveis |
@@ -202,27 +212,31 @@ Um *transactional outbox* para sincronização de mutação SQL e publicação d
 
 ### 7.3 Regras de negócio
 
-**RB-01 — Unicidade.** Uma medição é identificada por `(deviceId, eventId)`. Uma retransmissão com os mesmos campos e conteúdo não cria nova linha. Um mesmo identificador com conteúdo conflitante é rejeitado/quarentenado como inconsistência.
+**RB-01 — Unicidade.** Uma medição é identificada por `(deviceId, eventId)`. Retransmissão com os mesmos valores de negócio não cria nova leitura ou efeito colateral. Mesmo identificador com conteúdo conflitante preserva a primeira leitura e produz diagnóstico de integridade; o conflito pode ser detectado após `202`, no consumidor.
 
-**RB-02 — Tempo de evento ≠ tempo de recepção.** `occurredAtUtc` indica quando a medição foi tomada; `receivedAtUtc` indica quando foi recebida. Não substituir o primeiro pelo segundo.
+**RB-02 — Tempo de evento e recepção.** `occurredAtUtc` representa a medição; `receivedAtUtc` é atribuído pela API no recebimento, transportado no envelope e preservado pelo Worker. Reenvios podem ter recepção/correlação diferentes sem alterar a identidade do evento.
 
-**RB-03 — Mensagens atrasadas.** Uma leitura atrasada **entra no histórico**, mas não sobrescreve a visão de “última leitura por tempo de evento”. Empates de `occurredAtUtc` usam `EventId` como critério estável documentado, ou outro desempate determinístico escolhido em ADR.
+**RB-03 — Ordem temporal.** Leituras atrasadas entram no histórico. A última leitura é o máximo de `(occurredAtUtc, eventId)`: no empate, vence o maior UUID em representação canônica minúscula, sem hífens, comparada ordinalmente. Aplicação e SQL utilizam a mesma ordem, independentemente da ordem nativa de `uniqueidentifier`.
 
-**RB-04 — Associação temporal.** Uma leitura é associada à entrega ativa para aquele dispositivo **no instante `occurredAtUtc`**, não simplesmente à entrega ativa no momento do processamento. Se não houver associação, persistir leitura sem entrega e sinalizar para análise; não atribuir incorretamente.
+**RB-04 — Associação temporal.** Intervalos são `[ValidFromUtc, ValidToUtc)`, com fim nulo equivalente a aberto. Intervalos adjacentes são válidos; sobreposição para o mesmo dispositivo ou para a mesma entrega é rejeitada, inclusive sob concorrência. O vínculo da leitura usa `occurredAtUtc` e as associações existentes no processamento. Sem associação, a leitura persiste com entrega nula e indicação consultável; não há associação presumida pelo estado atual.
 
-**RB-05 — Alerta.** Temperatura `TemperatureC < MinTempC` ou `TemperatureC > MaxTempC` gera alerta. Limites inclusivos são permitidos. O alerta se vincula à leitura para não duplicar em reprocessamentos.
+**RB-05 — Alerta.** Temperatura abaixo de `MinTempC` ou acima de `MaxTempC` gera um alerta vinculado à leitura e à entrega. Limites inclusivos são válidos; leitura sem entrega não gera alerta de faixa. `(ReadingId, Type)` é único. Reconhecimento é idempotente e preserva o primeiro `AcknowledgedAtUtc`.
 
-**RB-06 — Unidades e validação.** Temperatura em °C, umidade entre 0 e 100%, latitude entre -90 e 90, longitude entre -180 e 180; coordenadas devem vir ambas ou nenhuma. Definir limites plausíveis configuráveis de sensor sem excluir valores extremos legítimos de teste.
+**RB-06 — Valores de entrada.** Unidades, precisão e limites seguem o [perfil do MVP](requisitos.md#4-limites-do-mvp). Valores não representáveis na escala aceita são rejeitados, sem arredondamento silencioso. Zero é válido quando estiver na faixa; ausência de campo obrigatório não equivale ao seu valor padrão.
 
-**RB-07 — Datas.** Todos timestamps armazenados e transmitidos em UTC; exemplos usam `Z`. A interface pode converter para timezone local explicitamente.
+**RB-07 — Datas.** Timestamps de entrada possuem offset explícito e são normalizados para UTC. A precisão aceita é preservada; exemplos públicos usam `Z`. A tolerância de evento futuro utiliza `receivedAtUtc` e o limite do perfil local. Eventos atrasados não são descartados por idade. A interface identifica o timezone de apresentação.
 
-**RB-08 — Retentativa.** Falhas transitórias (timeout, indisponibilidade de DB) podem ser repetidas com atraso/backoff e limite. Dados inválidos/conflitantes não devem gerar loop infinito.
+**RB-08 — Retentativa.** Falhas transitórias utilizam limite de entregas, backoff e budgets do perfil local. Falha permanente de contrato, dispositivo inexistente no consumidor ou conflito de conteúdo segue para diagnóstico/DLQ sem retry de negócio. Retentativas de transporte não recebem orçamento adicional ao da operação.
 
-**RB-09 — Mensagens difíceis.** Após esgotar tentativas, enviar para DLQ quando disponível e registrar o diagnóstico. Não executar `Complete` antes de confirmar a transação SQL.
+**RB-09 — Commit e falha definitiva.** `Complete` ocorre após commit SQL ou confirmação de duplicata já persistida. Falha antes do commit mantém a mensagem elegível a redelivery; falha no ACK após commit não desfaz a leitura. Mensagens irrecuperáveis ou com tentativas esgotadas seguem para DLQ com motivo/correlação. O diagnóstico é registrado no SQL quando disponível; indisponibilidade do SQL não remove os metadados de falha da DLQ.
 
-**RB-10 — Estado da entrega.** Exemplo: `Created -> InTransit -> Delivered` ou `Cancelled` conforme transições explícitas; não retroceder estados por webhook antigo.
+**RB-10 — Estado da entrega.** A entrega nasce em `Created`, com início e fim nulos. Transições permitidas: `Created → InTransit`, `Created → Cancelled`, `InTransit → Delivered` e `InTransit → Cancelled`. Repetir o estado atual é idempotente; estados terminais não reabrem e transições inválidas produzem `409`. O relógio da aplicação atribui `CreatedAtUtc` no cadastro, `StartedAtUtc` no início e `FinishedAtUtc` no encerramento. Uma data não pode preceder a anterior; regressão do relógio impede a transição com `409`, sem alteração parcial. Status não modifica implicitamente associações ou histórico; eventos externos atrasados não retrocedem o estado.
 
-**RB-11 — Segredos e logs.** Não salvar API keys, connection strings, tokens ou PII em logs, commits, fixtures públicas ou exemplos reais.
+**RB-11 — Segredos e logs.** API keys, connection strings, tokens e dados pessoais não integram logs, versionamento, fixtures públicas ou exemplos. Diagnósticos preservam identidade e categoria sem expor credenciais ou stack trace público.
+
+**RB-12 — Dispositivo ativo.** A API consulta existência/estado antes da publicação: inexistente retorna `404`, inativo `409`. A validação é o ponto de admissão; mudança posterior de estado não cancela a mensagem validada, inclusive se ocorrer entre validação e confirmação do broker. O Worker preserva o aceite anterior e não rejeita apenas porque o dispositivo foi desativado depois. Não há transação distribuída entre mudança de estado e publicação.
+
+**RB-13 — Preservação do histórico.** Leituras, faixas de entregas cadastradas e início/identidade das associações não são editados em P0. Uma associação aberta pode receber um fim válido uma única vez; repetir o mesmo fim é idempotente. Fim não posterior ao início produz `400`; alteração de fim já definido ou exclusão de leitura vinculada produz `409`. Associação criada depois de uma leitura não refaz vínculos anteriores; redelivery de evento persistido preserva o resultado original. Reclassificação retroativa exige funcionalidade posterior auditável.
 
 ---
 
@@ -245,23 +259,29 @@ Um *transactional outbox* para sincronização de mutação SQL e publicação d
 **Contrato:**
 
 - `eventId`, `deviceId`, `occurredAtUtc` e `temperatureC` são obrigatórios.
-- Os IDs são UUIDs válidos; `eventId` é estável entre retentativas.
+- Os IDs são UUIDs válidos e não nulos; `eventId` é estável entre retentativas.
 - `humidityPercent`, `latitude`, `longitude` são opcionais segundo RB-06.
 - `temperatureC` é número decimal, não string.
 - JSON inválido, campos obrigatórios ausentes e timestamps malformados resultam em `400` com `ProblemDetails`, sem exposição de segredos.
-- A mensagem na fila identifica versão do contrato, `eventId` e `correlationId`; seu conteúdo é composto pelo payload validado e metadados, sem entidades EF.
+- A mensagem na fila identifica versão do contrato, `eventId`, `correlationId` e `receivedAtUtc` atribuído pela API; seu conteúdo é composto pelo payload validado e metadados, sem entidades EF. O hash utiliza apenas campos de negócio normalizados, excluindo os metadados de recepção.
 
 ### 8.2 Lotes
 
-Endpoint de lote recebe `{ "items": [ ... ] }` com limite configurado, inicialmente **máximo de 1000 itens por request**. Há aceites/rejeições **por item**, com resultado que distingue `accepted`, `invalid` e `publishFailed`. Esse limite é um alvo de projeto, não benchmark de throughput.
+O endpoint recebe `{ "items": [ ... ] }`. Os limites de corpo e contagem estão no catálogo. Autenticação inválida, JSON sintaticamente inválido, envelope incorreto, corpo excessivo ou contagem inválida rejeitam a requisição inteira, antes de qualquer publicação.
 
-A publicação parcial distingue o resultado de cada item. Um lote pode conter, por exemplo, 997 aceites, 2 rejeições por validação e 1 falha de broker. O cliente pode repetir os itens com os mesmos `eventId`. Uma resposta global `202` não representa aceite integral quando houver falhas. `200 OK` com relatório por item é uma alternativa para lotes parciais; a escolha final dos códigos HTTP permanece pendente e será refletida no OpenAPI.
+Com envelope válido, a resposta é `200 OK` com um resultado para cada posição original, inclusive quando todos os itens falham. Cada resultado contém índice, `eventId` quando legível, status e código/motivo de erro sem segredos. Estados por item:
+
+- `accepted`: confirmação do broker, sem promessa de persistência já concluída.
+- `invalid`: contrato ou dispositivo rejeitado antes de publicar, com código equivalente ao da ingestão individual.
+- `publishFailed`: falha, timeout ou ausência de orçamento para publicação; motivo distingue tentativa falha de item não tentado.
+
+O resultado inclui contagens reconciliadas com a quantidade de posições. Não há `202` global para lote. Timeout pode ocorrer após aceite do broker sem resposta ao publicador: `publishFailed` não garante ausência da mensagem. Repetição utiliza os mesmos IDs e o consumidor idempotente resolve eventuais duplicatas. Cancelamento do cliente pode impedir a resposta; mensagens já confirmadas permanecem válidas.
 
 ---
 
 ## 9. API HTTP — contrato planejado
 
-Base: `/api/v1`.
+Rotas de negócio possuem base `/api/v1`. Endpoints `/health/*` ficam na raiz. Todos os itens são planejados; esta tabela não indica implementação.
 
 | Método | Rota | Finalidade | Prioridade |
 |---|---|---|---|
@@ -270,17 +290,24 @@ Base: `/api/v1`.
 | `POST` | `/devices` | Cadastrar dispositivo | P0 |
 | `GET` | `/devices` | Listar com paginação | P0 |
 | `GET` | `/devices/{id}` | Detalhar dispositivo | P0 |
+| `PATCH` | `/devices/{id}/status` | Ativar/desativar dispositivo | P0 |
 | `POST` | `/vehicles` | Cadastrar veículo | P0 |
+| `GET` | `/vehicles` | Listar veículos | P0 |
+| `GET` | `/vehicles/{id}` | Detalhar veículo | P0 |
 | `POST` | `/shipments` | Criar entrega | P0 |
 | `GET` | `/shipments` | Listar entregas | P0 |
-| `GET` | `/shipments/{id}` | Detalhar entrega | P0 |
+| `GET` | `/shipments/{id}` | Detalhar entrega e associações | P0 |
+| `PATCH` | `/shipments/{id}/status` | Alterar estado conforme RB-10 | P0 |
 | `POST` | `/shipments/{id}/assignments` | Associar dispositivo com intervalo | P0 |
+| `PATCH` | `/assignments/{id}/end` | Encerrar associação aberta | P0 |
 | `POST` | `/telemetry` | Receber uma medição | P0 |
 | `POST` | `/telemetry/batches` | Receber lote e retornar relatório por item | P0 |
 | `GET` | `/devices/{id}/readings` | Consultar histórico paginado e ordenado | P0 |
+| `GET` | `/shipments/{id}/readings` | Consultar histórico da entrega | P0 |
 | `GET` | `/shipments/{id}/latest-reading` | Última medição por tempo do evento | P0 |
 | `GET` | `/shipments/{id}/alerts` | Consultar alertas | P0 |
 | `POST` | `/alerts/{id}/acknowledge` | Reconhecer alerta | P0 |
+| `GET` | `/processing-failures` | Consultar falhas registradas no SQL | P0 |
 | `POST` | `/integrations/erp/sync` | Importação manual de ERP simulado | P1 |
 | `POST` | `/webhooks/carriers/{carrier}` | Receber evento de rastreio | P1 |
 | `GET` | `/integrations/attempts` | Ver erros e estado de envio | P1 |
@@ -288,10 +315,10 @@ Base: `/api/v1`.
 
 ### 9.1 Padrões HTTP
 
-- `201 Created` para recurso criado; `202 Accepted` para mensagem individual **confirmada na fila**, ainda não persistida no histórico.
-- `400 Bad Request` para contrato inválido, `401/403` para autenticação/autorização, `404` para inexistência, `409` para conflito detectável no ponto de entrada, `429` quando houver limitação; `503` ou erro de dependência para indisponibilidade do broker.
-- `ProblemDetails` para erros; `correlationId` para suporte, sem stack trace em resposta pública.
-- Paginação limitada por `pageSize`, ordem estável (`occurredAtUtc`, `eventId`) e filtros `fromUtc`, `toUtc`.
+- `201 Created` para recurso criado; `202 Accepted` para mensagem individual confirmada na fila; `200 OK` com relatório para lote válido; `204 No Content` para alteração idempotente de estado, encerramento de associação e reconhecimento de alerta.
+- `400 Bad Request` para contrato inválido; `401` para chave ausente/inválida; `403` para operação não permitida quando houver autorização; `404` para recurso inexistente; `409` para conflito de domínio; `413` para corpo excessivo; `503` para indisponibilidade/timeout da dependência. Rate limiting e resposta `429` não integram o aceite de P0.
+- `ProblemDetails` para erros da requisição; erros por item seguem o relatório de lote da seção 8.2. `correlationId` permite diagnóstico, sem stack trace em resposta pública.
+- Paginação e filtros seguem o perfil do catálogo. Histórico usa a ordem de RB-03; cadastros usam código normalizado e ID. A última leitura ausente retorna `404`; coleções sem dados retornam `200` com lista vazia.
 - OpenAPI deve refletir comportamento de processamento **eventual**: receber `202` não significa que o Worker já persistiu a medição.
 
 ---
@@ -307,7 +334,9 @@ Base: `/api/v1`.
 - `TelemetryReading (DeviceId, OccurredAtUtc DESC, EventId)` para histórico/última medição.
 - `TelemetryReading (ShipmentId, OccurredAtUtc DESC, EventId)` para consultas por entrega.
 - `TemperatureAlert (ReadingId, Type)` unique.
-- `DeviceAssignment` indexado por `(DeviceId, ValidFromUtc, ValidToUtc)`, com prevenção de sobreposição de períodos na lógica transacional.
+- `DeviceAssignment` indexado por dispositivo e por entrega com `ValidFromUtc`/`ValidToUtc`; a proteção transacional impede sobreposições e encerramento que invalide leituras, mesmo com concorrência.
+
+A ordenação final das consultas segue RB-03. A presença de `EventId` no índice não substitui a comparação canônica exigida para desempate.
 
 ### 10.2 Decisões de persistência
 
@@ -321,34 +350,28 @@ Base: `/api/v1`.
 
 ## 11. Worker, falhas e observabilidade
 
-### 11.1 Algoritmo de processamento por mensagem
+### 11.1 Processamento por mensagem
 
-1. Ler envelope da fila e validar versão.
-2. Propagar `correlationId` nos logs.
-3. Validar formato e existência/estado do dispositivo.
-4. Resolver `DeviceAssignment` pelo instante `occurredAtUtc`.
-5. Calcular hash canônico do payload de negócio para detectar conflito de chave.
-6. Abrir transação para inserir medição e possível alerta, respeitando unique constraints.
-7. Commit da transação SQL.
-8. Confirmar (`Complete`) a mensagem somente após sucesso do banco.
-9. Se duplicata idêntica, registrar deduplicação sem erro e confirmar.
-10. Se dado irrecuperável ou limite de tentativas, registrar diagnóstico e encaminhar para DLQ/quarentena.
+1. Validação de versão/envelope e propagação da correlação/recepção atribuídas pela API.
+2. Verificação da chave e do payload de negócio normalizado; duplicata idêntica confirma o resultado persistido e conflito preserva esse resultado com diagnóstico.
+3. Para evento novo, verificação de existência do dispositivo. O estado ativo já validado pela API segue RB-12.
+4. Transação SQL para resolução temporal da associação, medição e eventual alerta; isolamento/proteções impedem corrida com encerramento e respeitam unicidade.
+5. Commit antes de `Complete`. Concorrência na inserção retorna ao tratamento de duplicata/conflito, sem repetir efeitos.
+6. Falha transitória mantém elegibilidade para redelivery com orçamento limitado; falha permanente ou tentativas esgotadas seguem RB-09.
 
-### 11.2 Política de retentativas
+### 11.2 Budgets, retentativas e cancelamento
 
-- Classificação das falhas em **transitórias** e **permanentes**.
-- Limites de tentativas, tempo máximo de processamento e backoff com jitter quando aplicável; os valores permanecem pendentes na seção 23.1.
-- Registro da tentativa, causa e identidade do evento, com controle do volume de logs e exclusão de dados sensíveis.
-- Exceções de processamento associadas a diagnóstico e resultado explícito.
-- Tratamento de cancelamento do host e perda de lock da mensagem, com semântica de recuperação ainda pendente.
+Os valores iniciais são definidos no [perfil local](requisitos.md#4-limites-do-mvp), correspondente a RNF-06. A configuração do transporte e os retries internos do SDK respeitam o mesmo orçamento; tentativas de negócio adicionais não são empilhadas dentro de uma entrega.
+
+Cancelamento antes do commit interrompe a operação sem ACK; transação não confirmada é revertida. Se o commit já ocorreu, falha/cancelamento na confirmação permite redelivery idempotente. Perda de lock não autoriza nova confirmação com lock expirado. A classificação de erro inclui tentativa, causa e identidade, sem descarte silencioso.
 
 ### 11.3 Logs e medições mínimas
 
-Logs estruturados com `timestamp`, `level`, `operation`, `deviceId`, `eventId`, `correlationId`, `elapsedMs`, `result`.
+Logs estruturados incluem `timestamp`, `level`, `operation`, `deviceId`, `eventId`, `correlationId`, `elapsedMs` e `result` quando disponíveis. Mensagem inválida mantém pelo menos identidade do broker, correlação disponível e categoria.
 
-Métricas a exibir em desenvolvimento: `received`, `published`, `processed`, `duplicate`, `invalid`, `failed`, `alertCreated`, atraso entre `occurredAtUtc` e processamento; taxa e tempo medidos por um cenário reproduzível.
+Contadores incluem `received`, `published`, `processed`, `duplicate`, `invalid`, `failed` e `alertCreated`, com unidade documentada: requisição/item, entrega de mensagem ou evento de negócio. Eventos fora de ordem são identificáveis pelo tempo do evento, sem alterar o timestamp original.
 
-Resultados de desempenho incluem hardware, quantidade de mensagens, configuração, média, percentis e limitações do emulador utilizados na medição.
+Resultados de desempenho registram hardware, quantidade de mensagens, configuração, duração, latências e limitações do emulador utilizados na medição. Falha definitiva fica consultável no SQL quando disponível ou nos metadados da DLQ.
 
 ---
 
@@ -358,7 +381,7 @@ Resultados de desempenho incluem hardware, quantidade de mensagens, configuraç�
 
 - Ingestão de telemetria autenticada por API key de demonstração configurada por variável de ambiente.
 - Endpoints administrativos e interface limitados a loopback enquanto a autenticação local não estiver disponível. O mecanismo de demonstração não estabelece controles de produção.
-- Webhooks P1 com chave compartilhada ou assinatura HMAC verificada sobre o corpo bruto, `timestamp` e proteção contra replay; segredos em variáveis de ambiente.
+- Webhooks P1 com assinatura HMAC sobre corpo bruto e timestamp, controle de replay e segredo por origem configurado pelo ambiente; o contrato e a janela temporal são definidos antes de M6.
 - TLS ao sair do localhost; o Docker de demonstração não exige certificado público.
 - Limite de tamanho de requisição/lote; validação de entrada; tratamento de falhas sem expor stack trace.
 - Credenciais sintéticas de demonstração, sem tokens corporativos ou dados pessoais.
@@ -390,7 +413,7 @@ A interface utiliza Razor e JavaScript para as interações necessárias. Gráfi
 
 ## 14. Simulador de dispositivos
 
-CLI com modo determinístico (`--seed`) e cenários explícitos.
+CLI com seed (`--seed`), instante-base UTC (`--start-at-utc`) e cenários explícitos. Igualdade desses parâmetros reproduz IDs, tempos e medições; credenciais vêm da configuração local.
 
 | Modo | Comportamento | Objetivo de teste |
 |---|---|---|
@@ -406,9 +429,9 @@ CLI com modo determinístico (`--seed`) e cenários explícitos.
 Sintaxe de execução prevista para o simulador, ainda sem validação de implementação:
 
 ```bash
-dotnet run --project src/CargoPulse.Simulator -- --scenario normal --count 20 --seed 42
-dotnet run --project src/CargoPulse.Simulator -- --scenario duplicate --count 10 --seed 42
-dotnet run --project src/CargoPulse.Simulator -- --scenario out-of-order --count 30 --seed 42
+dotnet run --project src/CargoPulse.Simulator -- --scenario normal --count 20 --seed 42 --start-at-utc 2026-11-05T14:30:00Z
+dotnet run --project src/CargoPulse.Simulator -- --scenario duplicate --count 10 --seed 42 --start-at-utc 2026-11-05T14:30:00Z
+dotnet run --project src/CargoPulse.Simulator -- --scenario out-of-order --count 30 --seed 42 --start-at-utc 2026-11-05T14:30:00Z
 ```
 
 O simulador atua como cliente HTTP externo. A geração de dados percorre a API, sem inserção direta no SQL Server.
@@ -425,8 +448,8 @@ A integração consome uma API de ERP fictício e transforma pedidos externos em
 
 - `GET /orders?updatedSince=...` no mock ERP, ou endpoint equivalente documentado.
 - DTO externo separado do domínio.
-- Mapeamento de pedido: código externo, janela de entrega, tipo de carga, faixa permitida, referência de veículo quando disponível.
-- Idempotência por identificador externo/versão de atualização.
+- Mapeamento de pedido: código externo, tipo de carga, faixa permitida e referência de veículo. Campos de agendamento do ERP não substituem os timestamps reais do ciclo de vida; sua incorporação ao modelo P1 depende do contrato de M5.
+- Uma entrega por origem/identificador externo, com versão aplicada registrada; reenvio e atualização de versão não criam uma segunda entrega.
 - Registro de tentativa, código de resposta e possibilidade de reprocessamento seguro.
 
 ### 15.3 Falhas de integração
@@ -445,7 +468,7 @@ A extensão P2 prevê um segundo ERP simulado com WSDL e envelope XML. Sua imple
 ## 16. Webhooks de transportadoras (P1)
 
 - Receber `eventId`, `trackingCode`, `status`, `occurredAtUtc` e assinatura de origem.
-- Verificar autenticidade e janela temporal de replay.
+- Autenticidade verificada por HMAC e janela temporal de replay, conforme contrato da origem.
 - Persistir evento original normalizado com chave de idempotência.
 - Atualizar visão de estado **somente se** a transição e o tempo forem válidos. Eventos atrasados ficam no histórico, sem regressão de estado.
 - Códigos HTTP compatíveis com o redelivery do emissor fictício, com comportamento de entrega verificado por testes.
@@ -477,20 +500,44 @@ A extensão P2 prevê um segundo ERP simulado com WSDL e envelope XML. Sua imple
 | T07 | Lote com itens válidos e inválidos | Relatório por item e persistência apenas dos aceitos processados |
 | T08 | 1000 medições geradas | Sem perda não explicada; contagens reconciliadas no cenário local |
 | T09 | Leitura sem associação temporal | Persiste sem entrega, nunca vincula a entrega errada |
-| T10 | Dispositivo inativo | Comportamento de rejeição/erro definido e testado |
+| T10 | Dispositivo inexistente/inativo na ingestão | `404`/`409`, respectivamente, sem publicação; comportamento por item equivalente no lote |
 | T11 | Falha ERP HTTP 503 (P1) | Retentativa limitada, registro de tentativa, diagnóstico |
 | T12 | Webhook duplicado/atrasado (P1) | Não duplica evento nem retrocede status |
 | T13 | Campo obrigatório ausente | `400` com `ProblemDetails` e sem publish |
-| T14 | Endpoint sem chave válida | `401/403` sem aceitar medição |
+| T14 | Endpoint sem chave válida | `401`, sem aceitar medição nem consultar/publicar dados protegidos |
+| T15 | Cadastros duplicados, normalização e concorrência | Uma linha por código normalizado; referência inválida rejeitada; conflito `409` sem alteração parcial |
+| T16 | Intervalos adjacentes/sobrepostos, inclusive concorrentes | Instante final pertence apenas à próxima associação; dispositivo/entrega não recebem duas associações sobrepostas |
+| T17 | Empates temporais e payloads semanticamente equivalentes | Mesma última leitura em todas as permutações; UUID segue RB-03, inclusive quando ordem nativa do banco difere; formatação/offset equivalentes não geram conflito |
+| T18 | Limites numéricos, campos ausentes, zero e precisão excedida | Fronteiras aceitas; valor imediatamente externo ou não representável rejeitado sem arredondamento/publicação |
+| T19 | Offset ausente, equivalente e relógio no limite futuro | UTC preservado; falta de offset ou limite futuro excedido rejeitado; atraso válido permanece no histórico |
+| T20 | Falha ou timeout de publicação, inclusive após aceite real do broker | Sem falso aceite; `503` individual ou `publishFailed` por item; repetição do ID produz no máximo uma leitura |
+| T21 | Processo interrompido após commit e antes do ACK | Redelivery encontra uma leitura e no máximo um alerta; confirmação posterior não repete efeitos |
+| T22 | Cancelamento/perda de lock antes, durante e após commit | Nenhum ACK antecipado; transação pendente reverte; resultado confirmado permanece idempotente, inclusive quando a perda não incrementa o contador do broker |
+| T23 | Paginação, filtros e histórico sem dados | Limites inválidos retornam `400`; intervalo semiaberto e ordem estável sem repetição/omissão em conjunto fixo; lista vazia válida |
+| T24 | Todas as transições e repetições de status | Apenas transições RB-10 são aceitas; estado terminal não reabre; datas não retrocedem; repetição não muda timestamps |
+| T25 | Reconhecimento de alerta repetido/concorrente | Uma confirmação observável, primeiro timestamp preservado; alerta inexistente retorna `404` |
+| T26 | Dependência indisponível ou lenta | Liveness `200`; readiness `503` dentro do timeout configurado; recuperação restabelece readiness |
+| T27 | Erros públicos, logs, correlação e contrato | `ProblemDetails` coerente, sem segredos/stack trace público; evento rastreável do recebimento ao resultado |
+| T28 | Simulação repetida com seed e instante-base iguais | Mesmos IDs, payloads e ordem do cenário; execução usa HTTP e relatório reconciliado |
+| T29 | Interface vazia, erro de dependência e eventos atrasados | Estados identificados, timezone explícito, sem falha por entrega sem sensor/leitura |
+| T30 | Abandono/expiração até o limite, erro permanente e versão desconhecida | Contagem do broker e budgets respeitados; backoff dentro da faixa; erro permanente sem retry de negócio; DLQ com motivo/correlação |
+| T31 | Ambiente limpo, migrações e dados fictícios reaplicados | Restore/build/test reproduzíveis; migração/seed repetidos não duplicam dados; versões e pré-requisitos registrados |
+| T32 | Encerramento de associação e cadastro retroativo | Fim que exclui leitura vinculada retorna `409`; repetição do mesmo fim é idempotente; histórico anterior não é reclassificado |
+| T33 | Desativação após validação/aceite e novas tentativas | Mensagem previamente validada ainda processa; nova validação com dispositivo inativo retorna `409` |
+| T34 | Lote vazio, excessivo, misto, integralmente inválido ou sem broker | `400`/`413` globais antes de publicar; envelope válido retorna `200` e um resultado por posição, inclusive falha integral |
+| T35 | Assinatura adulterada ou replay de webhook (P1) | Rejeição sem atualização de estado; evento autêntico atrasado não causa regressão |
+| T36 | ERP antigo/conflitante, mapeamento ausente e retries concorrentes (P1) | Versão antiga/conflitante não sobrescreve a atual; `NeedsMapping` persiste até correção; reprocessamento produz um efeito de negócio |
 
 ### 17.3 Teste de carga funcional
 
-O cenário funcional de carga utiliza um conjunto fechado de **1000 eventos** e registra:
+O cenário funcional de carga utiliza um conjunto fechado de **1000 eventos**, com prazo finito de teste registrado antes da execução, e registra:
 
 - eventos gerados, válidos, inválidos, aceitos pelo broker, processados, duplicados e falhos;
 - tempo total, latência e throughput observados;
 - configuração do Worker, recursos de máquina e limitações conhecidas do emulador;
 - query de reconciliação que prove a soma dos resultados.
+
+A reconciliação separa tentativas HTTP, entregas do broker e identidades de negócio. No cenário sem falhas, cada evento válido confirmado pelo broker possui uma leitura ao término, sem pendências. Nos cenários de falha, identidades confirmadas possuem leitura ou diagnóstico terminal justificável; mensagens pendentes ao fim do prazo reprovam o cenário. Conflitos distinguem o payload preservado do payload rejeitado.
 
 Os resultados caracterizam apenas o cenário e o ambiente medidos. Capacidade de produção e SLA dependem de validação específica; otimizações utilizam essas medições como baseline.
 
@@ -514,7 +561,8 @@ CargoPulse/
 │   ├── CargoPulse.IntegrationTests/
 │   └── CargoPulse.EndToEndTests/       # conforme disponibilidade da infraestrutura
 ├── docs/
-│   └── especificacao.md
+│   ├── especificacao.md
+│   └── requisitos.md
 ├── infra/
 │   ├── servicebus/                    # configuração local do emulador
 │   └── sql/                           # scripts opcionais de desenvolvimento
@@ -528,7 +576,7 @@ CargoPulse/
 └── LICENSE                            # definição pendente
 ```
 
-A árvore representa a estrutura prevista, sem indicar arquivos já implementados. A documentação técnica pública está concentrada em `docs/`. Arquitetura, regras, contratos e testes permanecem nas seções desta especificação; documentos independentes dependem de conteúdo e uso próprios. Decisões com alternativas e consequências relevantes podem ser registradas em ADRs curtos.
+A árvore representa a estrutura prevista, sem indicar arquivos já implementados. A documentação técnica pública está concentrada em `docs/`. Requisitos e limites possuem catálogo próprio; arquitetura, regras, contratos e cenários de teste permanecem nesta especificação. Documentos adicionais dependem de conteúdo e uso próprios. Decisões com alternativas e consequências relevantes podem ser registradas em ADRs curtos.
 
 ---
 
@@ -548,7 +596,7 @@ A árvore representa a estrutura prevista, sem indicar arquivos já implementado
 
 ### 19.1 Definição de pronto por funcionalidade
 
-- [ ] Requisito e contrato identificados, com aceite verificável e lacunas relevantes resolvidas.
+- [ ] IDs RF/RNF identificados, contrato e aceite verificável, com decisões do marco resolvidas.
 - [ ] Implementação compilando sem erro.
 - [ ] Comportamento positivo e cenários adversariais verificados, conforme seção 17.1.
 - [ ] Logs suficientes para diagnóstico e sem segredos.
@@ -559,88 +607,34 @@ A árvore representa a estrutura prevista, sem indicar arquivos já implementado
 
 ---
 
-## 20. Marcos e ordem de implementação
+## 20. Etapas, dependências e critérios de saída
 
-A sequência de entrega é M0 → M4 para P0, seguida de M5–M6 para P1. Os itens de M7 são opcionais e dependem de necessidade técnica demonstrada. Os critérios abaixo descrevem resultados esperados; não representam progresso concluído.
+### 20.1 Preparação de engenharia
 
-### M0 — Fundação e compilação
+O catálogo de RF/RNF define a base de escopo. Antes de M0, a revisão de arquitetura delimita módulos, dependências e responsabilidade das transações; SOLID, open/closed e compartilhamento de regras atendem a RNF-02. Políticas concretas de resiliência atendem a RNF-06, com circuit breaker somente quando houver dependência e recuperação que o justifiquem. Essa revisão não exige a implementação de P1/P2.
 
-- [ ] Ambiente identificado: sistema operacional, SDK, Docker/Compose, arquivos existentes e estado do Git.
-- [ ] Repositório e solução .NET com os projetos da seção 18 e suites unitária e de integração compiláveis.
-- [ ] Referências entre projetos compatíveis com as dependências da seção 6.
-- [ ] `.gitignore`, `.editorconfig`, `.env.example` sem segredos e README com instruções de execução.
-- [ ] `/health/live` funcional, primeiro teste automatizado e OpenAPI inicial; readiness conforme dependências disponíveis.
-- [ ] Formatação e CI de restore/build/test; suites dependentes de containers com execução e pré-requisitos separados.
-- [ ] Compose de SQL Server e Service Bus Emulator com versões fixadas, configuração compatível com a documentação oficial e prontidão verificada no ambiente local.
+### 20.2 Entregas
 
-**Validação:** `dotnet --info`, `dotnet restore`, `dotnet build --no-restore` e `dotnet test --no-build`, com paths e flags correspondentes à solução. A validação de infraestrutura inclui `docker compose config`, inicialização dos serviços e verificações de prontidão e conexão. Dependências ausentes e verificações não executadas integram o registro de validação.
+A sequência obrigatória é M0 → M1 → M2 → M3 → M4. Cada marco depende do aceite do anterior. M2 entrega um fluxo pequeno já com proteções de integridade; M3 amplia a cobertura das falhas. P0 só está aceito após M4 e os critérios da seção 21. As entregas abaixo estão planejadas, sem conclusão de implementação.
 
-**Aceite:** solução compilável, testes iniciais aprovados e infraestrutura local disponível pelos comandos documentados.
+Todo marco inclui cenários adversariais para as regras já implementadas. As referências abaixo indicam evidências mínimas; um marco posterior não adia a validação da lógica criada no incremento atual.
 
-### M1 — Domínio e banco
+| Marco | Escopo e requisitos | Evidência de saída |
+|---|---|---|
+| M0 — Fundação | Solução e referências, configuração, health endpoints, Compose e CI. RF-13; início de RNF-01, RNF-02, RNF-04, RNF-09 e RNF-11. | Restore/build/test aprovados, prontidão das dependências verificada, T26/T31 aplicáveis e comandos documentados. |
+| M1 — Cadastro e domínio | RF-01–RF-03 e parte inicial de RF-04: dispositivos, veículos, entregas, estados e associações; EF/migrations e constraints. | Cadastros e consultas por API; T15, T16, T18, T23, T24 e T32 no escopo de cadastro, incluindo concorrência de associações. |
+| M2 — Fluxo mínimo de telemetria | RF-04 completo, RF-05 e partes iniciais de RF-06, RF-07 e RF-12. API → fila → Worker → SQL → consulta; proteção de vínculos, chave única e commit antes de ACK desde o início. | T01, T02, T06, T10, T13, T14, T19–T21, T27, T32 e T33 no fluxo simples; cenário `normal` reproduzível. |
+| M3 — Confiabilidade e operação | RF-06–RF-10 completos: conflitos, atrasos/empates, alertas, lotes, budgets, cancelamento, DLQ e consulta de falhas. | Todos os cenários P0 da matriz relacionados aos requisitos implementados, incluindo T03–T10, T17–T25, T30 e T32–T34. |
+| M4 — MVP local | RF-11/RF-12 completos; integração das telas, todos os cenários do simulador, seed, documentação e demonstração. RNF-01–RNF-11 integralmente aplicáveis. | Todos os T de P0 aprovados, incluindo T08 e T28–T31; reconciliação de 1000 eventos e critérios da seção 21. Release `v0.1.0` condicionada ao aceite. |
+| M5 — ERP REST | Após M4 e contrato externo definido: RF-14 e parte ERP de RF-16, sem API corporativa real. | T11/T36, importação idempotente, falha transitória, correção de mapeamento e reprocessamento seguro. |
+| M6 — Webhooks | Após M5 e contrato de origem definido: RF-15 e complemento de RF-16. | T12/T35/T36, HMAC/replay, eventos fora de ordem e tentativas consultáveis. |
+| M7 — Extensões opcionais | Após M4 e decisão justificada: SOAP, cache, Functions, outbox ou medições adicionais. Cada opção define requisito e aceite próprios antes de começar. | Evidência específica da necessidade e do resultado. M7 não bloqueia o aceite de P0/P1. |
 
-- [ ] `Device`, `Vehicle`, `Shipment` e `DeviceAssignment` implementados.
-- [ ] Validações, status e transições definidos.
-- [ ] Mapeamentos EF Core, migrations e constraints aplicáveis.
-- [ ] Cadastro e consultas paginadas por API.
-- [ ] Testes unitários e de integração do schema.
+### 20.3 Validação da fundação
 
-**Aceite:** cadastro de entrega e associação temporal disponíveis por API, com persistência verificada.
+M0 identifica sistema operacional, `dotnet --info`, Docker/Compose e estado do repositório existente. A estrutura é acrescentada sem recriar o histórico. Arquivos mínimos incluem `.gitignore`, `.editorconfig`, `.env.example`, configuração de SDK, README e workflow de CI; projetos e referências seguem as seções 6/18.
 
-### M2 — Fluxo completo de telemetria
-
-- [ ] Contrato de evento especificado.
-- [ ] Ingestão individual autenticada.
-- [ ] Publicação no Service Bus após validação.
-- [ ] Consumo pelo Worker e gravação no SQL Server.
-- [ ] Envio de dados pelo cenário `normal` do simulador.
-- [ ] Logs, correlação e teste de integração de ponta a ponta.
-
-**Aceite:** leitura enviada pelo simulador persistida no SQL Server e consultável por API.
-
-### M3 — Confiabilidade de telemetria
-
-- [ ] Idempotência com constraint única e hash de payload.
-- [ ] Tratamento de eventos fora de ordem.
-- [ ] Associação temporal à entrega.
-- [ ] Alertas de temperatura com deduplicação.
-- [ ] Retentativas, DLQ/quarentena e diagnóstico de falhas.
-- [ ] Ingestão em lote com relatório por item.
-
-**Aceite:** cenários T02–T09 aprovados, com resultados reconciliados e falhas rastreáveis.
-
-### M4 — Dashboard e distribuição do MVP
-
-- [ ] Telas essenciais em MVC/Razor.
-- [ ] Cenários completos do simulador.
-- [ ] Compose e seed fictício determinístico.
-- [ ] README com instalação, arquitetura, demonstração, testes e limitações conhecidas.
-- [ ] Vídeo e capturas do fluxo em execução.
-- [ ] Release `v0.1.0` vinculada aos critérios de aceitação.
-
-**Aceite:** execução e reprodução da demonstração a partir da documentação, sem configuração adicional não documentada.
-
-### M5 — Integração ERP REST (P1)
-
-- [ ] Mock ERP e DTOs externos separados do domínio.
-- [ ] Importação com idempotência e mapeamentos.
-- [ ] Tratamento de falhas HTTP e reprocessamento.
-- [ ] Testes automatizados de erro e retentativa.
-
-### M6 — Webhook de rastreamento (P1)
-
-- [ ] Mock de transportadora e contrato de webhook.
-- [ ] Assinatura e autenticação de origem.
-- [ ] Deduplicação, ordenação e máquina de estados.
-- [ ] Consulta das tentativas de integração.
-
-### M7 — Extensões técnicas (P2)
-
-- [ ] SOAP/XML com WSDL simulado.
-- [ ] Redis condicionado a custo de consulta medido.
-- [ ] Azure Functions como alternativa de ingestão.
-- [ ] Métricas estruturadas e testes de carga comparativos.
-- [ ] Outbox condicionado à necessidade de publicação integrada a uma mutação SQL.
+A validação executa `dotnet restore`, `dotnet build --no-restore`, `dotnet test --no-build` e `docker compose config`, com paths/flags correspondentes à solução. Inicialização é acompanhada de verificações de prontidão/conexão. Suites com containers possuem pré-requisitos e execução separados; indisponibilidade de dependência fica identificada como verificação não executada.
 
 ---
 
@@ -698,31 +692,25 @@ A distribuição do MVP depende dos seguintes resultados:
 
 ---
 
-## 23. Definições pendentes
+## 23. Decisões de engenharia pendentes
 
-### 23.1 Requisitos funcionais e não funcionais
+### 23.1 Limites da próxima revisão
 
-As seções 2, 7–13 e 17 estabelecem necessidades e restrições que ainda dependem de consolidação em um catálogo de RF/RNF. A identificação de cada requisito inclui prioridade, comportamento ou qualidade exigida e critério de aceite verificável, com referência às regras RB e aos cenários T relacionados. Metas de desempenho permanecem propostas até a existência de medições reproduzíveis.
+Os comportamentos e limites de P0 estão definidos no [catálogo de requisitos](requisitos.md). As decisões abaixo tratam da implementação desses critérios; não reabrem o escopo funcional por padrão.
 
-| Área | Definição pendente |
-|---|---|
-| Dispositivo inexistente/inativo | Etapa de rejeição e consulta do resultado após eventual resposta `202` (T10) |
-| Tempo e associação | Fronteiras dos intervalos, empates, eventos futuros, lacunas e alterações retroativas |
-| Validação e contratos | Precisão e limites numéricos, tamanho em bytes, paginação e códigos HTTP para falhas parciais |
-| Resiliência | Timeout, orçamento total de processamento, limite de retry, cancelamento, perda de lock e aplicabilidade de circuit breaker por dependência |
-| Qualidades mensuráveis | Critérios de execução local, segurança, diagnóstico, recuperação e desempenho |
+| Referência | Decisão necessária | Momento limite |
+|---|---|---|
+| ADR-001 | Fronteiras de módulos, portas necessárias, consultas e responsabilidade de transações; dependências entre projetos. | Revisão antes de M0; concretização antes do caso de uso afetado. |
+| ADR-002 | Canonicalização e algoritmo de hash; representação de escala/UTC e consulta com a ordem de UUID definida em RB-03. | Antes de M2; testes completos em M3. |
+| ADR-003 | Isolamento transacional das associações e do encerramento, inclusive corrida com gravação de leitura. | Associações antes de M1; integração com leituras antes de M2. |
+| ADR-004 | Versões de SDK/imagens, requisitos do host e configuração verificável de SQL Server/Service Bus Emulator. | Antes do aceite de M0. |
+| ADR-005 | Configuração de loopback do ambiente local; autenticação/TLS para qualquer exposição adicional. | Loopback em M0; controles adicionais antes de exposição remota. |
+| ADR-006 | Aplicação dos budgets, contagem de entregas, backoff, lock/cancelamento, diagnóstico/DLQ e necessidade de circuit breaker por dependência. | M2 para integridade e budgets; antes de M3 para recuperação completa. |
 
-A implementação de comportamentos dependentes dessas definições está condicionada à resolução da lacuna correspondente.
+Os IDs identificam temas de decisão, sem exigir um arquivo por tema. O registro inclui contexto, alternativas, escolha e consequências quando houver decisão relevante; configuração simples permanece próxima do código e da documentação responsável.
 
-### 23.2 Decisões arquiteturais pendentes
+### 23.2 Definições condicionadas a P1/P2
 
-| Referência | Tema |
-|---|---|
-| ADR-001 | ORM, consultas e localização da consulta de última leitura |
-| ADR-002 | Desempate de timestamps e canonicalização do payload (`PayloadHash`) |
-| ADR-003 | Lacunas de associação temporal e alterações retroativas |
-| ADR-004 | Configuração e validação do Azure Service Bus Emulator no ambiente local |
-| ADR-005 | Autenticação do painel e limites de exposição da demonstração |
-| ADR-006 | Retentativas, DLQ e reconciliação de eventos |
+Antes de M5, o contrato do ERP define versão externa, mapeamentos, critérios de correção e operação de reprocessamento. Antes de M6, o contrato da transportadora define algoritmo de assinatura, janela de replay, identidade por origem e mapeamento de estados. Esses contratos não bloqueiam P0.
 
-As referências identificam temas em análise. O registro de uma decisão inclui contexto, alternativas consideradas, escolha e consequências, conforme necessidade de implementação.
+P2 não possui compromisso de implementação. Metas de throughput, latência e disponibilidade de produção, retenção/expurgo e recuperação de mensagens após reinício do emulador exigem escopo e evidências específicos. O MVP preserva histórico e declara a limitação de durabilidade do ambiente local.
