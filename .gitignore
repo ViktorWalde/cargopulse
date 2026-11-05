@@ -1,0 +1,19 @@
+# Estado local de agentes e ferramentas
+.agents/
+.idea/
+.directory
+.DS_Store
+Thumbs.db
+
+# Configuração local
+.env
+.env.*
+!.env.example
+*.user
+*.suo
+
+# Artefatos .NET e resultados de testes
+**/bin/
+**/obj/
+TestResults/
+coverage/
